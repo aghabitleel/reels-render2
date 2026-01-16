@@ -1,44 +1,37 @@
 name: Render Reel
-
 on:
-  repository_dispatch:
-    types: [render_reel]
+  workflow_dispatch:
+    inputs:
+      payload_url:
+        description: 'URL to payload.json'
+        required: true
+        type: string
 
 jobs:
   render:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install deps
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg jq python3
 
-      - name: Write payload to file
+      - name: Download payload
         run: |
-          cat > payload.json <<'JSON'
-          ${{ toJson(github.event.client_payload) }}
-          JSON
-          echo "Payload saved:"
-          jq '.' payload.json
+          curl -L --retry 5 --retry-delay 2 -o payload.json "${{ github.event.inputs.payload_url }}"
+          cat payload.json
 
-      - name: Render (talking head then broll)
-        env:
-          PAYLOAD_PATH: payload.json
+      - name: Render video
         run: |
-          set -euo pipefail
+          set -e
+          PAYLOAD_PATH="payload.json"
+          WIDTH=1080
+          HEIGHT=1920
+          FPS=30
+          CHUNK_SEC=3
+          OUT_NAME="reel.mp4"
 
           AUDIO_URL=$(jq -r '.audio_url // ""' "$PAYLOAD_PATH")
-          OUT_NAME=$(jq -r '.out_name // "reel_v2.mp4"' "$PAYLOAD_PATH")
-          WIDTH=$(jq -r '.width // 1080' "$PAYLOAD_PATH")
-          HEIGHT=$(jq -r '.height // 1920' "$PAYLOAD_PATH")
-          FPS=$(jq -r '.fps // 30' "$PAYLOAD_PATH")
-          CHUNK_SEC=$(jq -r '.chunk_sec // 4' "$PAYLOAD_PATH")
-
           LAYOUT_TYPE=$(jq -r '.layout_config.type // ""' "$PAYLOAD_PATH")
           TH_URL=$(jq -r '.layout_config.talking_head_url // ""' "$PAYLOAD_PATH")
           TH_SPEED=$(jq -r '.layout_config.talking_head_speed // 1.0' "$PAYLOAD_PATH")
@@ -97,12 +90,7 @@ jobs:
 
           # Audio duration (keep decimals to avoid edge cutoffs)
           AUDIO_DUR=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 work/audio.wav || echo "0")
-          AUDIO_DUR_INT=$(python3 - <<'PY'
-import math
-s = float("${AUDIO_DUR}" or "0")
-print(max(1, int(math.floor(s + 1e-6))))
-PY
-)
+          AUDIO_DUR_INT=$(python3 -c "import math; s = float('${AUDIO_DUR}' or '0'); print(max(1, int(math.floor(s + 1e-6))))")
           echo "Audio duration: ${AUDIO_DUR}s (int=${AUDIO_DUR_INT}s)"
 
           # Normalize talking head to full 9:16, mute it, apply speed if needed
@@ -112,12 +100,7 @@ PY
             -an -c:v libx264 -preset veryfast -crf 21 work/th_norm.mp4
 
           TH_DUR_RAW=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 work/th_norm.mp4 || echo "0")
-          TH_DUR_INT=$(python3 - <<'PY'
-import math
-s = float("${TH_DUR_RAW}" or "0")
-print(max(1, int(math.floor(s + 1e-6))))
-PY
-)
+          TH_DUR_INT=$(python3 -c "import math; s = float('${TH_DUR_RAW}' or '0'); print(max(1, int(math.floor(s + 1e-6))))")
 
           # Talking head should not exceed audio duration
           if [ "$TH_DUR_INT" -gt "$AUDIO_DUR_INT" ]; then
@@ -166,7 +149,7 @@ PY
               # IMPORTANT FIX:
               # concat demuxer requires paths relative to concat file location OR absolute paths.
               # Since concat file is in work/, reference files as work/bchunk_n.mp4.
-              echo "file work/bchunk_${n}.mp4" >> work/concat_broll.txt
+              echo "file bchunk_${n}.mp4" >> work/concat_broll.txt
             done
 
             echo "Concatenating broll..."
@@ -176,10 +159,10 @@ PY
             ffmpeg -y -i work/broll_seq_raw.mp4 -t "$REMAIN" -an -c:v libx264 -preset veryfast -crf 21 work/seg_broll.mp4
 
             echo "Concatenating talking head + broll..."
-            cat > work/concat_all.txt <<'TXT'
-file work/seg_th.mp4
-file work/seg_broll.mp4
-TXT
+            cat > work/concat_all.txt <<EOF
+file seg_th.mp4
+file seg_broll.mp4
+EOF
             ffmpeg -y -f concat -safe 0 -i work/concat_all.txt -c copy work/stack.mp4
           else
             cp work/seg_th.mp4 work/stack.mp4
@@ -187,7 +170,7 @@ TXT
 
           # Generate lightweight captions from script_lines by evenly distributing across audio duration
           echo "Generating captions..."
-          python3 - <<'PY'
+          python3 <<'PYSCRIPT'
 import json, math
 
 payload = json.load(open("payload.json","r",encoding="utf-8"))
@@ -247,7 +230,7 @@ for i, text in enumerate(lines):
 
 open("work/captions.ass","w",encoding="utf-8").write("\n".join(ass))
 print("Wrote work/captions.ass with", len(lines), "lines")
-PY
+PYSCRIPT
 
           echo "Burning captions and muxing audio..."
           ffmpeg -y -i work/stack.mp4 -i work/audio.wav \
