@@ -310,7 +310,8 @@ jobs:
           done
 
           CAPTION_X=$((WIDTH / 2))
-          CAPTION_Y=$((HEIGHT / 2))
+          # Position text 1/3 up from bottom (2/3 down from top)
+          CAPTION_Y=$((HEIGHT * 2 / 3))
 
           cat > subs.ass <<'ASS_HEADER'
           [Script Info]
@@ -364,18 +365,6 @@ jobs:
               [ "$ok" -ne 1 ] && chunk_end_time=$(awk -v a="$start" 'BEGIN{print a+1.0}')
             fi
 
-            full_text=""
-            for ((k=i; k<chunk_end; k++)); do
-              word="${WORDS[k]}"
-              esc="${word//\\/\\\\}"
-              esc="${esc//\{/\\{}"
-              esc="${esc//\}/\\}}"
-              full_text="${full_text}${esc}"
-              if [ $k -lt $((chunk_end - 1)) ]; then
-                full_text="${full_text} "
-              fi
-            done
-
             chunk_s_str=$(awk -v t="$chunk_start_time" 'BEGIN{
               if (t<0) t=0;
               h=int(t/3600); m=int((t-h*3600)/60); s=t-h*3600-m*60;
@@ -389,9 +378,6 @@ jobs:
               cs=int((s - int(s))*100);
               printf("%d:%02d:%02d.%02d", h, m, int(s), cs);
             }')
-
-            printf 'Dialogue: 0,%s,%s,Reels,,0,0,0,,{\\an5\\pos(%d,%d)\\blur0.4\\fad(80,80)}%s\n' \
-              "$chunk_s_str" "$chunk_e_str" "$CAPTION_X" "$CAPTION_Y" "$full_text" >> subs.ass
 
             word_start=$start
             for ((j=i; j<chunk_end; j++)); do
@@ -430,9 +416,11 @@ jobs:
                 esc="${esc//\}/\\}}"
 
                 if [ $k -eq $j ]; then
+                  # Highlighted word in yellow
                   text="${text}{\\c&H00FFFF&}${esc}{\\c&H00FFFFFF&}"
                 else
-                  text="${text}{\\alpha&HFF&}${esc}{\\alpha&H00&}"
+                  # Non-highlighted words stay white
+                  text="${text}${esc}"
                 fi
 
                 if [ $k -lt $((chunk_end - 1)) ]; then
@@ -440,7 +428,7 @@ jobs:
                 fi
               done
 
-              printf 'Dialogue: 1,%s,%s,Reels,,0,0,0,,{\\an5\\pos(%d,%d)\\blur0.4\\fad(80,80)}%s\n' \
+              printf 'Dialogue: 0,%s,%s,Reels,,0,0,0,,{\\an5\\pos(%d,%d)\\blur0.4\\fad(80,80)}%s\n' \
                 "$s_str" "$e_str" "$CAPTION_X" "$CAPTION_Y" "$text" >> subs.ass
 
               word_start=$word_end
