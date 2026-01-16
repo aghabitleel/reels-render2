@@ -310,8 +310,8 @@ jobs:
           done
 
           CAPTION_X=$((WIDTH / 2))
-          # Position text 1/3 up from bottom (2/3 down from top)
-          CAPTION_Y=$((HEIGHT * 2 / 3))
+          # FIX 1: Move text lower (75% down instead of 66%)
+          CAPTION_Y=$((HEIGHT * 3 / 4))
 
           cat > subs.ass <<'ASS_HEADER'
           [Script Info]
@@ -411,13 +411,12 @@ jobs:
               text=""
               for ((k=i; k<chunk_end; k++)); do
                 word="${WORDS[k]}"
+                # FIX 2: Only escape backslashes, NOT braces yet
                 esc="${word//\\/\\\\}"
-                esc="${esc//\{/\\{}"
-                esc="${esc//\}/\\}}"
-
+                
                 if [ $k -eq $j ]; then
-                  # Highlighted word in yellow
-                  text="${text}{\\c&H00FFFF&}${esc}{\\c&H00FFFFFF&}"
+                  # Highlighted word in yellow - proper ASS format
+                  text="${text}{\c&H00FFFF&}${esc}{\c&HFFFFFF&}"
                 else
                   # Non-highlighted words stay white
                   text="${text}${esc}"
@@ -427,6 +426,10 @@ jobs:
                   text="${text} "
                 fi
               done
+
+              # FIX 3: NOW escape braces in the final assembled text
+              text="${text//\{/\\{}"
+              text="${text//\}/\\}}"
 
               printf 'Dialogue: 0,%s,%s,Reels,,0,0,0,,{\\an5\\pos(%d,%d)\\blur0.4\\fad(80,80)}%s\n' \
                 "$s_str" "$e_str" "$CAPTION_X" "$CAPTION_Y" "$text" >> subs.ass
