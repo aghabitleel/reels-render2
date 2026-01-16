@@ -23,8 +23,9 @@ jobs:
           cat payload.json
 
       - name: Render video
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
           PAYLOAD_PATH="payload.json"
           WIDTH=1080
           HEIGHT=1920
@@ -86,7 +87,7 @@ jobs:
           fi
 
           AUDIO_DUR=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 work/audio.wav || echo "0")
-          AUDIO_DUR_INT=$(python3 -c "import math; s = float('${AUDIO_DUR}' or '0'); print(max(1, int(math.floor(s + 1e-6))))")
+          AUDIO_DUR_INT=$(python3 -c "import math; s=float('${AUDIO_DUR}' or '0'); print(max(1, int(math.floor(s + 1e-6))))")
           echo "Audio duration: ${AUDIO_DUR}s (int=${AUDIO_DUR_INT}s)"
 
           echo "Normalizing talking head..."
@@ -95,7 +96,7 @@ jobs:
             -an -c:v libx264 -preset veryfast -crf 21 work/th_norm.mp4
 
           TH_DUR_RAW=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 work/th_norm.mp4 || echo "0")
-          TH_DUR_INT=$(python3 -c "import math; s = float('${TH_DUR_RAW}' or '0'); print(max(1, int(math.floor(s + 1e-6))))")
+          TH_DUR_INT=$(python3 -c "import math; s=float('${TH_DUR_RAW}' or '0'); print(max(1, int(math.floor(s + 1e-6))))")
 
           if [ "$TH_DUR_INT" -gt "$AUDIO_DUR_INT" ]; then
             TH_DUR_INT=$AUDIO_DUR_INT
@@ -148,10 +149,11 @@ jobs:
             ffmpeg -y -i work/broll_seq_raw.mp4 -t "$REMAIN" -an -c:v libx264 -preset veryfast -crf 21 work/seg_broll.mp4
 
             echo "Concatenating talking head + broll..."
-            cat > work/concat_all.txt <<CONCAT_EOF
-          file seg_th.mp4
-          file seg_broll.mp4
-          CONCAT_EOF
+            cat > work/concat_all.txt <<'CONCAT_EOF'
+file seg_th.mp4
+file seg_broll.mp4
+CONCAT_EOF
+
             cd work
             ffmpeg -y -f concat -safe 0 -i concat_all.txt -c copy stack.mp4
             cd ..
