@@ -285,7 +285,7 @@ jobs:
 
           TOTAL_SEC=$(cat audio_dur.txt)
           TEXT=$(sed '/^[[:space:]]*$/d' script.txt | tr '\n' ' ' | sed 's/  */ /g')
-          
+
           if [ -z "$TEXT" ]; then
             echo "script.txt has no content, skipping subtitles."
             touch subs.missing
@@ -293,7 +293,7 @@ jobs:
           fi
 
           mapfile -t WORDS < <(echo "$TEXT" | tr ' ' '\n' | sed '/^[[:space:]]*$/d')
-          
+
           if [ "${#WORDS[@]}" -eq 0 ]; then
             echo "No words found, skipping subtitles."
             touch subs.missing
@@ -310,7 +310,6 @@ jobs:
           done
 
           CAPTION_X=$((WIDTH / 2))
-          # FIX 1: Move text lower (75% down instead of 66%)
           CAPTION_Y=$((HEIGHT * 3 / 4))
 
           cat > subs.ass <<'ASS_HEADER'
@@ -365,21 +364,8 @@ jobs:
               [ "$ok" -ne 1 ] && chunk_end_time=$(awk -v a="$start" 'BEGIN{print a+1.0}')
             fi
 
-            chunk_s_str=$(awk -v t="$chunk_start_time" 'BEGIN{
-              if (t<0) t=0;
-              h=int(t/3600); m=int((t-h*3600)/60); s=t-h*3600-m*60;
-              cs=int((s - int(s))*100);
-              printf("%d:%02d:%02d.%02d", h, m, int(s), cs);
-            }')
-            
-            chunk_e_str=$(awk -v t="$chunk_end_time" 'BEGIN{
-              if (t<0) t=0;
-              h=int(t/3600); m=int((t-h*3600)/60); s=t-h*3600-m*60;
-              cs=int((s - int(s))*100);
-              printf("%d:%02d:%02d.%02d", h, m, int(s), cs);
-            }')
+            i_word_start=$start
 
-            word_start=$start
             for ((j=i; j<chunk_end; j++)); do
               word_len=${word_chars[j]}
 
@@ -389,18 +375,18 @@ jobs:
                 print d;
               }')
 
-              word_end=$(awk -v a="$word_start" -v d="$word_duration" 'BEGIN{print a+d}')
+              word_end=$(awk -v a="$i_word_start" -v d="$word_duration" 'BEGIN{print a+d}')
               if [ $j -eq $((chunk_end - 1)) ]; then
                 word_end=$chunk_end_time
               fi
 
-              s_str=$(awk -v t="$word_start" 'BEGIN{
+              s_str=$(awk -v t="$i_word_start" 'BEGIN{
                 if (t<0) t=0;
                 h=int(t/3600); m=int((t-h*3600)/60); s=t-h*3600-m*60;
                 cs=int((s - int(s))*100);
                 printf("%d:%02d:%02d.%02d", h, m, int(s), cs);
               }')
-              
+
               e_str=$(awk -v t="$word_end" 'BEGIN{
                 if (t<0) t=0;
                 h=int(t/3600); m=int((t-h*3600)/60); s=t-h*3600-m*60;
@@ -411,14 +397,15 @@ jobs:
               text=""
               for ((k=i; k<chunk_end; k++)); do
                 word="${WORDS[k]}"
-                # FIX 2: Only escape backslashes, NOT braces yet
+
+                # Escape ONLY inside the word text (do not break ASS tags)
                 esc="${word//\\/\\\\}"
-                
+                esc="${esc//\{/\\{}"
+                esc="${esc//\}/\\}}"
+
                 if [ $k -eq $j ]; then
-                  # Highlighted word in yellow - proper ASS format
-                  text="${text}{\c&H00FFFF&}${esc}{\c&HFFFFFF&}"
+                  text="${text}{\\c&H00FFFF&}${esc}{\\c&HFFFFFF&}"
                 else
-                  # Non-highlighted words stay white
                   text="${text}${esc}"
                 fi
 
@@ -427,14 +414,10 @@ jobs:
                 fi
               done
 
-              # FIX 3: NOW escape braces in the final assembled text
-              text="${text//\{/\\{}"
-              text="${text//\}/\\}}"
-
               printf 'Dialogue: 0,%s,%s,Reels,,0,0,0,,{\\an5\\pos(%d,%d)\\blur0.4\\fad(80,80)}%s\n' \
                 "$s_str" "$e_str" "$CAPTION_X" "$CAPTION_Y" "$text" >> subs.ass
 
-              word_start=$word_end
+              i_word_start=$word_end
             done
 
             i=$chunk_end
